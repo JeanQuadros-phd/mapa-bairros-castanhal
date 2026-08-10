@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mapa dos Bairros de Castanhal (PA)</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #ffffff;
+      --panel-fg: #1f2937;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--panel-fg);
+      background: var(--bg);
+    }
+    #map { position: absolute; inset: 0; z-index: 0; }
+
+    .app-header {
+      position: absolute; top: 12px; left: 12px; z-index: 1000;
+      background: var(--panel); border-radius: 12px; box-shadow: var(--shadow);
+      padding: 10px 14px; max-width: min(92vw, 380px);
+    }
+    .app-header h1 { font-size: 16px; margin: 0 0 2px; line-height: 1.2; }
+    .app-header p { font-size: 12px; color: var(--muted); margin: 0; }
+
+    .legend {
+      position: absolute; top: 12px; right: 12px; z-index: 1000;
+      background: var(--panel); border-radius: 12px; box-shadow: var(--shadow);
+      width: 260px; max-height: calc(100vh - 24px);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .legend__head {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #eef0f3; user-select: none;
+    }
+    .legend__title { font-size: 13px; font-weight: 600; }
+    .legend__count { font-size: 11px; color: var(--muted); background: #f3f4f6; border-radius: 999px; padding: 2px 8px; }
+    .legend__toggle { border: none; background: transparent; cursor: pointer; font-size: 16px; line-height: 1; color: var(--muted); }
+    .legend__list { overflow-y: auto; padding: 6px; }
+    .legend.collapsed .legend__list { display: none; }
+    .legend__item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+    .legend__item:hover { background: #f3f4f6; }
+    .legend__swatch { width: 14px; height: 14px; border-radius: 4px; flex: 0 0 auto; border: 1px solid rgba(0,0,0,0.15); }
+    .legend__name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .legend__foot { padding: 8px 12px; font-size: 11px; color: var(--muted); border-top: 1px solid #eef0f3; }
+
+    .bairro-label {
+      background: transparent; border: none; box-shadow: none; color: #111827;
+      font-weight: 700; font-size: 12px;
+      text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff;
+      pointer-events: none;
+    }
+    /* Esconde rótulos quando o mapa está muito afastado (reduz sobreposição) */
+    .labels-hidden .bairro-label { display: none; }
+
+    .overlay {
+      position: absolute; inset: 0; z-index: 1500; display: flex; align-items: center; justify-content: center;
+      background: rgba(15, 23, 42, 0.55); backdrop-filter: blur(2px);
+    }
+    .overlay.hidden { display: none; }
+    .overlay__card { background: var(--panel); border-radius: 14px; box-shadow: var(--shadow); padding: 22px 26px; text-align: center; max-width: 440px; }
+    .spinner { width: 34px; height: 34px; margin: 0 auto 12px; border: 4px solid #e5e7eb; border-top-color: var(--accent); border-radius: 50%; animation: spin 0.9s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .overlay__card h2 { margin: 0 0 6px; font-size: 16px; }
+    .overlay__card p { margin: 0; font-size: 13px; color: var(--muted); }
+    .overlay__card button { margin-top: 14px; border: none; background: var(--accent); color: #fff; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+
+    .toast {
+      position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 1400;
+      background: #fef3c7; color: #92400e; border: 1px solid #fde68a; border-radius: 10px;
+      padding: 8px 14px; font-size: 12px; box-shadow: var(--shadow); max-width: 90vw; text-align: center;
+    }
+    .toast.hidden { display: none; }
+
+    @media (max-width: 640px) {
+      .legend { width: 210px; }
+      .app-header { max-width: 58vw; }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <header class="app-header">
+    <h1>Bairros de Castanhal · PA</h1>
+    <p>Cada bairro em um polígono colorido · role para dar zoom · clique na legenda para focar</p>
+  </header>
+
+  <aside class="legend" id="legend">
+    <div class="legend__head" id="legendHead">
+      <span class="legend__title">Bairros</span>
+      <span class="legend__count" id="legendCount">…</span>
+      <button class="legend__toggle" id="legendToggle" title="Recolher/expandir">▾</button>
+    </div>
+    <div class="legend__list" id="legendList"></div>
+    <div class="legend__foot" id="legendFoot">Fonte: OpenStreetMap</div>
+  </aside>
+
+  <div class="overlay" id="overlay">
+    <div class="overlay__card">
+      <div class="spinner" id="spinner"></div>
+      <h2 id="overlayTitle">Carregando bairros…</h2>
+      <p id="overlayMsg">Consultando o OpenStreetMap (Overpass) e montando os polígonos. Isso pode levar alguns segundos.</p>
+      <button id="overlayBtn" style="display:none">Fechar</button>
+    </div>
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""></script>
+  <script src="https://unpkg.com/osmtogeojson@3.0.0-beta.5/osmtogeojson.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+  <script>
+  (function () {
+    "use strict";
+
+    var CASTANHAL_CENTER = [-1.2976, -47.9264];
+
+    // --- Mapa base -----------------------------------------------------------
+    var map = L.map("map", { center: CASTANHAL_CENTER, zoom: 13, zoomControl: true });
+
+    var ruas = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    });
+    var satelite = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 19, attribution: "Imagens &copy; Esri, Maxar, Earthstar Geographics" }
+    );
+    ruas.addTo(map);
+    L.control.layers(
+      { "Ruas (OpenStreetMap)": ruas, "Satélite (Esri)": satelite },
+      {}, { position: "bottomright", collapsed: false }
+    ).addTo(map);
+    L.control.scale({ imperial: false }).addTo(map);
+
+    // Esconde rótulos quando afastado
+    function updateLabelVisibility() {
+      var c = map.getContainer();
+      if (map.getZoom() < 12) c.classList.add("labels-hidden");
+      else c.classList.remove("labels-hidden");
+    }
+    map.on("zoomend", updateLabelVisibility);
+
+    // --- Cores determinísticas -----------------------------------------------
+    function hashStr(s) {
+      var h = 2166136261;
+      for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+      return h >>> 0;
+    }
+    function colorFor(name) {
+      var hue = ((hashStr(name) % 360) * 137.508) % 360;
+      return "hsl(" + hue.toFixed(1) + ",68%,52%)";
+    }
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+
+    // --- UI ------------------------------------------------------------------
+    var overlay = document.getElementById("overlay");
+    var spinner = document.getElementById("spinner");
+    var overlayTitle = document.getElementById("overlayTitle");
+    var overlayMsg = document.getElementById("overlayMsg");
+    var overlayBtn = document.getElementById("overlayBtn");
+    var toast = document.getElementById("toast");
+    var legendList = document.getElementById("legendList");
+    var legendCount = document.getElementById("legendCount");
+    var legendFoot = document.getElementById("legendFoot");
+
+    overlayBtn.addEventListener("click", function () { overlay.classList.add("hidden"); });
+    function hideOverlay() { overlay.classList.add("hidden"); }
+    function showError(title, msg) {
+      spinner.style.display = "none";
+      overlayTitle.textContent = title; overlayMsg.textContent = msg;
+      overlayBtn.style.display = "inline-block";
+    }
+    function showToast(msg) { toast.textContent = msg; toast.classList.remove("hidden"); }
+    document.getElementById("legendHead").addEventListener("click", function () {
+      document.getElementById("legend").classList.toggle("collapsed");
+    });
+
+    // --- Overpass ------------------------------------------------------------
+    var OVERPASS_ENDPOINTS = [
+      "https://overpass-api.de/api/interpreter",
+      "https://overpass.kumi.systems/api/interpreter",
+      "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+    ];
+    var QUERY = [
+      "[out:json][timeout:90];",
+      'area["name"="Castanhal"]["admin_level"="8"]->.a;',
+      "(",
+      '  relation["boundary"="administrative"]["admin_level"="8"]["name"="Castanhal"](area.a);',
+      '  relation["boundary"="administrative"]["admin_level"="10"](area.a);',
+      '  relation["place"~"^(suburb|neighbourhood|quarter)$"](area.a);',
+      '  way["place"~"^(suburb|neighbourhood|quarter)$"](area.a);',
+      '  node["place"~"^(suburb|neighbourhood|quarter)$"](area.a);',
+      ");",
+      "out geom;"
+    ].join("\n");
+
+    function fetchOverpass(i) {
+      if (i >= OVERPASS_ENDPOINTS.length) return Promise.reject(new Error("Overpass indisponível"));
+      return fetch(OVERPASS_ENDPOINTS[i], {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "data=" + encodeURIComponent(QUERY)
+      })
+        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+        .catch(function () { return fetchOverpass(i + 1); });
+    }
+
+    // --- Helpers de geometria -------------------------------------------------
+    function isPolygon(g) { return g && (g.type === "Polygon" || g.type === "MultiPolygon"); }
+    function isPoint(g) { return g && g.type === "Point"; }
+    function tagsOf(f) { var p = f.properties || {}; return p.tags || p; }
+    function nameOf(f) { var t = tagsOf(f); return t.name || t["name:pt"] || t.official_name || null; }
+    function norm(s) {
+      return String(s).trim().toLowerCase().normalize("NFD")
+        .replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
+    }
+    function betterDisplay(a, b) {
+      // prefere o nome com mais minúsculas (evita CAIXA ALTA); empate → mais longo
+      function score(s) { return (s.match(/[a-zà-ú]/g) || []).length; }
+      if (!a) return b; if (!b) return a;
+      var sa = score(a), sb = score(b);
+      if (sb > sa) return b;
+      if (sb === sa && b.length > a.length) return b;
+      return a;
+    }
+    function safeIntersect(p1, p2) { try { return turf.intersect(p1, p2); } catch (e) { return null; } }
+    function seedFromPolygon(f) {
+      try { return turf.centerOfMass(f).geometry.coordinates; }
+      catch (e) { try { return turf.centroid(f).geometry.coordinates; } catch (e2) { return null; } }
+    }
+
+    // --- Camadas -------------------------------------------------------------
+    var bairrosLayer = L.featureGroup().addTo(map);
+    var byName = {};   // display -> {layer, color, poly}
+    var order = [];
+
+    function drawPolygon(display, geojsonGeom, labelLatLng) {
+      var color = colorFor(display);
+      var layer = L.geoJSON(geojsonGeom, {
+        style: { color: color, weight: 1.5, opacity: 0.9, fillColor: color, fillOpacity: 0.42 }
+      });
+      layer.eachLayer(function (l) {
+        l.on("mouseover", function () { l.setStyle({ fillOpacity: 0.65, weight: 3 }); if (l.bringToFront) l.bringToFront(); });
+        l.on("mouseout", function () { l.setStyle({ fillOpacity: 0.42, weight: 1.5 }); });
+        l.bindPopup("<strong>" + escapeHtml(display) + "</strong><br>Bairro de Castanhal (PA)");
+      });
+      layer.addTo(bairrosLayer);
+      // rótulo no ponto de referência do bairro
+      var tip = L.tooltip({ permanent: true, direction: "center", className: "bairro-label", opacity: 1 })
+        .setContent(display).setLatLng(labelLatLng);
+      layer.bindTooltip(tip);
+      layer.openTooltip(labelLatLng);
+      byName[display] = { layer: layer, color: color, poly: true };
+      order.push(display);
+    }
+
+    function drawMarker(display, latlng) {
+      var color = colorFor(display);
+      var m = L.circleMarker(latlng, { radius: 8, color: "#fff", weight: 2, fillColor: color, fillOpacity: 1 });
+      m.bindPopup("<strong>" + escapeHtml(display) + "</strong><br>Bairro de Castanhal (PA)");
+      m.bindTooltip(display, { permanent: true, direction: "right", className: "bairro-label", offset: [8, 0] });
+      m.addTo(bairrosLayer);
+      byName[display] = { layer: m, color: color, poly: false };
+      order.push(display);
+    }
+
+    // --- Processamento -------------------------------------------------------
+    function processData(gj) {
+      var feats = (gj && gj.features) || [];
+      var muniCandidates = [];
+      var groups = {}; // key -> {display, realPoly, point}
+
+      feats.forEach(function (f) {
+        var t = tagsOf(f);
+        var name = nameOf(f);
+        if (!name) return;
+        // Limite municipal (admin_level 8)
+        if (t.admin_level === "8" && isPolygon(f.geometry)) { muniCandidates.push(f); return; }
+        // Bairros: place suburb/neighbourhood/quarter OU boundary admin_level 10
+        var isBairro = (t.place && /^(suburb|neighbourhood|quarter)$/.test(t.place)) || t.admin_level === "10";
+        if (!isBairro) return;
+
+        var key = norm(name);
+        var g = groups[key] || (groups[key] = { display: name, realPoly: null, point: null });
+        g.display = betterDisplay(g.display, name);
+        if (isPolygon(f.geometry)) {
+          if (!g.realPoly) g.realPoly = f;
+          else { // fica com o de maior área
+            try { if (turf.area(f) > turf.area(g.realPoly)) g.realPoly = f; } catch (e) {}
+          }
+        } else if (isPoint(f.geometry)) {
+          if (!g.point) g.point = f.geometry.coordinates.slice();
+        }
+      });
+
+      // Limite municipal = maior polígono admin_level 8
+      var M = null, mArea = -1;
+      muniCandidates.forEach(function (f) {
+        try { var a = turf.area(f); if (a > mArea) { mArea = a; M = f; } } catch (e) {}
+      });
+
+      // Lista de bairros com semente (ponto representativo)
+      var bairros = [];
+      Object.keys(groups).forEach(function (key) {
+        var g = groups[key];
+        var seed = g.realPoly ? seedFromPolygon(g.realPoly) : g.point;
+        if (!seed) return;
+        bairros.push({ display: g.display, realPoly: g.realPoly, seed: seed });
+      });
+
+      if (bairros.length === 0) { finishEmpty(); return; }
+
+      // Evita sementes idênticas (Voronoi falha com pontos duplicados)
+      var used = {};
+      bairros.forEach(function (b, i) {
+        var k = b.seed[0].toFixed(5) + "," + b.seed[1].toFixed(5);
+        if (used[k]) { b.seed = [b.seed[0] + (i + 1) * 1e-4, b.seed[1] + (i + 1) * 1e-4]; }
+        used[k] = true;
+      });
+
+      // Voronoi sobre todas as sementes
+      var cells = null;
+      try {
+        var pts = turf.featureCollection(bairros.map(function (b) { return turf.point(b.seed); }));
+        var bbox;
+        if (M) bbox = turf.bbox(M);
+        else {
+          bbox = turf.bbox(pts);
+          var dx = (bbox[2] - bbox[0]) * 0.15, dy = (bbox[3] - bbox[1]) * 0.15;
+          bbox = [bbox[0] - dx, bbox[1] - dy, bbox[2] + dx, bbox[3] + dy];
+        }
+        cells = turf.voronoi(pts, { bbox: bbox });
+      } catch (e) { cells = null; }
+
+      // Desenha cada bairro como polígono
+      bairros.forEach(function (b, i) {
+        var labelLatLng = L.latLng(b.seed[1], b.seed[0]);
+        var geom = null;
+
+        if (b.realPoly) {
+          geom = b.realPoly;                       // contorno real do OSM
+        } else if (cells && cells.features && cells.features[i]) {
+          var cell = cells.features[i];
+          geom = M ? (safeIntersect(cell, M) || cell) : cell;   // Voronoi recortado ao município
+        }
+
+        if (geom && (isPolygon(geom.geometry) || isPolygon(geom))) {
+          try { drawPolygon(b.display, geom, labelLatLng); return; }
+          catch (e) {}
+        }
+        drawMarker(b.display, labelLatLng);        // último recurso
+      });
+
+      finish(M);
+    }
+
+    function buildLegend() {
+      legendList.innerHTML = "";
+      order.slice().sort(function (a, b) { return a.localeCompare(b, "pt-BR"); }).forEach(function (name) {
+        var info = byName[name];
+        var row = document.createElement("div");
+        row.className = "legend__item";
+        row.innerHTML =
+          '<span class="legend__swatch" style="background:' + info.color + '"></span>' +
+          '<span class="legend__name">' + escapeHtml(name) + "</span>";
+        row.addEventListener("click", function () {
+          var lyr = info.layer;
+          if (info.poly && lyr.getBounds) map.fitBounds(lyr.getBounds().pad(0.12));
+          else if (lyr.getLatLng) map.setView(lyr.getLatLng(), 16);
+          if (lyr.openPopup) lyr.openPopup();
+        });
+        legendList.appendChild(row);
+      });
+      legendCount.textContent = order.length + " bairros";
+    }
+
+    function finish(M) {
+      if (order.length === 0) { finishEmpty(); return; }
+      buildLegend();
+      try { map.fitBounds(bairrosLayer.getBounds().pad(0.05)); } catch (e) {}
+      updateLabelVisibility();
+      var reais = order.filter(function (n) { return byName[n].poly; }).length;
+      legendFoot.innerHTML =
+        "Fonte: OpenStreetMap · contornos reais quando disponíveis; demais bairros por " +
+        "<strong>partição de Voronoi</strong> (aproximada).";
+      hideOverlay();
+    }
+
+    function finishEmpty() {
+      showError("Nenhum bairro encontrado",
+        "O OpenStreetMap não retornou bairros para Castanhal agora. Tente recarregar mais tarde.");
+      loadEmergency();
+    }
+
+    // --- Fallback de emergência (Overpass totalmente indisponível) ------------
+    var EMERGENCIA = [
+      { name: "Centro", ll: [-1.2976, -47.9264] },
+      { name: "Jaderlândia", ll: [-1.2815, -47.9070] },
+      { name: "Saudade", ll: [-1.2790, -47.9420] },
+      { name: "Ianetama", ll: [-1.3130, -47.9290] },
+      { name: "Nova Olinda", ll: [-1.3050, -47.9150] },
+      { name: "Cristo Redentor", ll: [-1.2880, -47.9350] },
+      { name: "Estrela", ll: [-1.3010, -47.9380] },
+      { name: "Pirapora", ll: [-1.2900, -47.9180] },
+      { name: "Salgadinho", ll: [-1.3080, -47.9280] },
+      { name: "Santa Catarina", ll: [-1.2830, -47.9250] }
+    ];
+    function loadEmergency() {
+      EMERGENCIA.forEach(function (b) { if (!byName[b.name]) drawMarker(b.name, L.latLng(b.ll[0], b.ll[1])); });
+      if (order.length) {
+        buildLegend();
+        legendFoot.textContent = "Modo aproximado (Overpass indisponível) — posições de referência.";
+        try { map.fitBounds(bairrosLayer.getBounds().pad(0.1)); } catch (e) {}
+      }
+    }
+
+    // --- Boot ----------------------------------------------------------------
+    fetchOverpass(0)
+      .then(function (json) { processData(osmtogeojson(json)); })
+      .catch(function () {
+        showError("Não foi possível carregar os bairros",
+          "Falha ao consultar o OpenStreetMap. Exibindo posições aproximadas de referência.");
+        showToast("Overpass indisponível — mostrando modo aproximado.");
+        loadEmergency();
+      });
+  })();
+  </script>
+</body>
+</html>
