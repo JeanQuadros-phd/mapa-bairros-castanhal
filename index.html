@@ -96,7 +96,7 @@
 
   <header class="app-header">
     <h1>Bairros de Castanhal · PA</h1>
-    <p>Cada bairro em um polígono colorido · role para dar zoom · clique na legenda para focar</p>
+    <p>Cada bairro em um polígono colorido · role para dar zoom · clique na legenda para focar · <strong>Shift+clique</strong> copia a coordenada do ponto</p>
   </header>
 
   <aside class="legend" id="legend">
@@ -151,8 +151,18 @@
       "Óscar Reis", "Portelinha", "Jardim Modelo", "Novo Cruzeiro",
       "Residencial Marechal", "Eugênia Magalhães", "Santa Helena", "Jardim Tóquio",
       "Salles Jardim", "Conjunto Ipês", "Conjunto Tangarás", "Ana Júlia", "São José",
-      "Titanlândia", "Betânia", "Jardim das Flores", "Japiim"
+      "Titanlândia", "Betânia", "Jardim das Flores", "Japiim", "COAB"
     ];
+
+    // Coordenadas fixas AUTORITATIVAS [lng, lat]. Se um bairro aqui existir, esta posição
+    // é usada (sobrepõe OSM/Nominatim) — serve para corrigir erros e fixar bairros que
+    // não estão no OSM. Os valores abaixo são APROXIMADOS (placeholder): use Shift+clique
+    // no mapa para copiar a coordenada exata do ponto certo e me enviar, que eu fixo.
+    var FALLBACK_COORDS = {
+      "estrela": [-47.9330, -1.2960],
+      "milagre": [-47.9090, -1.3135],
+      "coab": [-47.9420, -1.3010]
+    };
 
     // --- Mapa base -----------------------------------------------------------
     var map = L.map("map", { center: CASTANHAL_CENTER, zoom: 13, zoomControl: true });
@@ -171,6 +181,14 @@
       {}, { position: "bottomright", collapsed: false }
     ).addTo(map);
     L.control.scale({ imperial: false }).addTo(map);
+
+    // Shift+clique: mostra e copia a coordenada do ponto (para ajustar bairros faltantes)
+    map.on("click", function (e) {
+      if (!e.originalEvent || !e.originalEvent.shiftKey) return;
+      var s = e.latlng.lat.toFixed(6) + ", " + e.latlng.lng.toFixed(6);
+      showToast("Coordenada: " + s + (navigator.clipboard ? " (copiada)" : ""));
+      if (navigator.clipboard) { navigator.clipboard.writeText(s).catch(function () {}); }
+    });
 
     // Esconde rótulos quando afastado
     function updateLabelVisibility() {
@@ -268,6 +286,12 @@
       return a;
     }
     function safeIntersect(p1, p2) { try { return turf.intersect(p1, p2); } catch (e) { return null; } }
+    function curatedDisplay(key) {
+      for (var i = 0; i < CURATED_BAIRROS.length; i++) {
+        if (norm(CURATED_BAIRROS[i]) === key) return CURATED_BAIRROS[i];
+      }
+      return key;
+    }
     function seedFromPolygon(f) {
       try { return turf.centerOfMass(f).geometry.coordinates; }
       catch (e) { try { return turf.centroid(f).geometry.coordinates; } catch (e2) { return null; } }
@@ -354,9 +378,23 @@
 
       // Completa com os bairros oficiais que faltaram no OSM (geocodificados no
       // navegador, restritos à caixa de Castanhal). Garante Estrela, Milagre etc.
-      var have = {};
-      bairros.forEach(function (b) { have[norm(b.display)] = true; });
-      var missing = CURATED_BAIRROS.filter(function (n) { return !have[norm(n)]; });
+      var have = {}, byKey = {};
+      bairros.forEach(function (b) { var k = norm(b.display); have[k] = true; byKey[k] = b; });
+
+      // Override autoritativo: bairros com coordenada fixa usam-na (corrige erros do
+      // OSM/Nominatim e garante presença), substituindo a semente se já existir.
+      Object.keys(FALLBACK_COORDS).forEach(function (k) {
+        if (byKey[k]) { byKey[k].seed = FALLBACK_COORDS[k].slice(); byKey[k].realPoly = null; }
+        else {
+          var b = { display: curatedDisplay(k), realPoly: null, seed: FALLBACK_COORDS[k].slice() };
+          bairros.push(b); byKey[k] = b; have[k] = true;
+        }
+      });
+
+      // Geocodifica só os curados que faltam E não têm coordenada fixa
+      var missing = CURATED_BAIRROS.filter(function (n) {
+        var k = norm(n); return !have[k] && !FALLBACK_COORDS[k];
+      });
       if (missing.length) {
         overlayMsg.textContent = "Localizando bairros que faltam no OSM (" + missing.length + ")…";
       }
