@@ -130,9 +130,10 @@
     "use strict";
 
     var CASTANHAL_CENTER = [-1.2976, -47.9264];
-    // Recorte urbano: raio máximo (km) de cada célula Voronoi ao redor do ponto do
-    // bairro. Evita que bairros de borda "estiquem" para a zona rural do município.
-    var URBAN_RADIUS_KM = 1.7;
+    // Recorte urbano: raio (km) do buffer de cada bairro. A UNIÃO desses buffers forma
+    // a "mancha urbana" usada para recortar as células de Voronoi — assim não sobram
+    // vãos entre bairros e as células não se esticam para a zona rural.
+    var URBAN_RADIUS_KM = 1.9;
 
     // --- Mapa base -----------------------------------------------------------
     var map = L.map("map", { center: CASTANHAL_CENTER, zoom: 13, zoomControl: true });
@@ -356,6 +357,18 @@
         cells = turf.voronoi(pts, { bbox: bbox });
       } catch (e) { cells = null; }
 
+      // Mancha urbana = união dos buffers de todos os bairros. Recorta as células de
+      // Voronoi sem deixar vãos entre bairros (a mancha é totalmente coberta pelas
+      // células) e sem esticar para a zona rural.
+      var urbanMask = null;
+      bairros.forEach(function (b) {
+        try {
+          var buf = turf.buffer(turf.point(b.seed), URBAN_RADIUS_KM, { units: "kilometers", steps: 16 });
+          if (buf) urbanMask = urbanMask ? (turf.union(urbanMask, buf) || urbanMask) : buf;
+        } catch (e) {}
+      });
+      if (urbanMask && M) { var mc = safeIntersect(urbanMask, M); if (mc) urbanMask = mc; }
+
       // Desenha cada bairro como polígono
       bairros.forEach(function (b, i) {
         var labelLatLng = L.latLng(b.seed[1], b.seed[0]);
@@ -365,12 +378,9 @@
           geom = b.realPoly;                       // contorno real do OSM
         } else if (cells && cells.features && cells.features[i]) {
           geom = cells.features[i];
-          if (M) geom = safeIntersect(geom, M) || geom;          // dentro do município
-          // Recorte urbano: limita a célula a um raio ao redor do ponto do bairro
-          try {
-            var disk = turf.buffer(turf.point(b.seed), URBAN_RADIUS_KM, { units: "kilometers" });
-            if (disk) geom = safeIntersect(geom, disk) || geom;
-          } catch (e) {}
+          // Recorta à mancha urbana (união dos buffers); fallback: limite municipal
+          if (urbanMask) geom = safeIntersect(geom, urbanMask) || geom;
+          else if (M) geom = safeIntersect(geom, M) || geom;
         }
 
         if (geom && (isPolygon(geom.geometry) || isPolygon(geom))) {
