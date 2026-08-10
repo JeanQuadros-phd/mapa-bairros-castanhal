@@ -10,13 +10,13 @@ para cada bairro e navegação **estilo Google Maps** (zoom, arraste, satélite)
 - **Zoom/pan estilo Google Maps** (Leaflet): roda do mouse, `+/−`, duplo-clique e arraste.
 - **Cada bairro em um polígono colorido e nomeado** — cor distinta por bairro (paleta
   por ângulo áureo em HSL) e rótulo com o nome.
-- **Dados ao vivo do OpenStreetMap** — ao abrir, a página consulta a
-  [Overpass API](https://overpass-api.de/). Onde o OSM tem o **contorno oficial** do
-  bairro, ele é usado; para os demais (que existem no OSM apenas como um ponto), a
-  página gera automaticamente o polígono por **partição de Voronoi** (área de influência
-  de cada ponto), com **recorte urbano** (raio máximo por bairro) e recorte ao limite do
-  município — garantindo que **todos** os bairros apareçam como área, e não como ponto,
-  sem "esticar" para a zona rural.
+- **Dados ao vivo do OpenStreetMap (+ complemento por geocodificação)** — ao abrir, a
+  página consulta a [Overpass API](https://overpass-api.de/) para pegar os bairros
+  mapeados no OSM e **completa os oficiais que faltam** (ex.: Estrela, Milagre)
+  geocodificando-os pelo [Nominatim](https://nominatim.org/), restrito à área de
+  Castanhal. Cada bairro vira um polígono por **partição de Voronoi** (área de influência
+  do ponto), recortada pelo **fecho convexo** dos bairros (cobertura contígua, sem vãos)
+  e pelo limite do município.
 - **Dois mapas base alternáveis:** Ruas (OpenStreetMap) e Satélite (Esri World Imagery).
 - **Legenda clicável** — lista os bairros; clicar centraliza e dá zoom no bairro.
 - **Modo de emergência** — se a Overpass estiver indisponível, exibe posições

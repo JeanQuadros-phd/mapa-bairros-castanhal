@@ -135,6 +135,25 @@
     // cobertura SEM vãos internos, e mais compacta que o município inteiro.
     var URBAN_MARGIN_KM = 0.4;
 
+    // Caixa (bbox) urbana de Castanhal [minLon, minLat, maxLon, maxLat], usada para
+    // restringir a geocodificação dos bairros faltantes (evita resultados fora da área).
+    var CASTANHAL_BBOX = [-47.98, -1.345, -47.875, -1.25];
+
+    // Bairros oficiais/conhecidos de Castanhal. Os que já vierem do OpenStreetMap são
+    // usados de lá; os que faltarem são geocodificados (Nominatim) no navegador, para
+    // garantir que apareçam (ex.: Estrela, Milagre). Distrito de Apeú fica fora de
+    // propósito (é afastado do núcleo urbano e distorceria o recorte).
+    var CURATED_BAIRROS = [
+      "Centro", "Estrela", "Novo Estrela", "Jaderlândia", "Saudade", "Ianetama",
+      "Nova Olinda", "Cristo Redentor", "Fonte Boa", "Heliolândia", "Imperador",
+      "Jardim das Acácias", "Pirapora", "Salgadinho", "Santa Catarina", "Caiçara",
+      "Milagre", "Santa Lídia", "Bom Jesus", "Cariri", "Pantanal", "Rouxinol",
+      "Óscar Reis", "Portelinha", "Jardim Modelo", "Novo Cruzeiro",
+      "Residencial Marechal", "Eugênia Magalhães", "Santa Helena", "Jardim Tóquio",
+      "Salles Jardim", "Conjunto Ipês", "Conjunto Tangarás", "Ana Júlia", "São José",
+      "Titanlândia", "Betânia", "Jardim das Flores", "Japiim"
+    ];
+
     // --- Mapa base -----------------------------------------------------------
     var map = L.map("map", { center: CASTANHAL_CENTER, zoom: 13, zoomControl: true });
 
@@ -333,8 +352,53 @@
         bairros.push({ display: g.display, realPoly: g.realPoly, seed: seed });
       });
 
-      if (bairros.length === 0) { finishEmpty(); return; }
+      // Completa com os bairros oficiais que faltaram no OSM (geocodificados no
+      // navegador, restritos à caixa de Castanhal). Garante Estrela, Milagre etc.
+      var have = {};
+      bairros.forEach(function (b) { have[norm(b.display)] = true; });
+      var missing = CURATED_BAIRROS.filter(function (n) { return !have[norm(n)]; });
+      if (missing.length) {
+        overlayMsg.textContent = "Localizando bairros que faltam no OSM (" + missing.length + ")…";
+      }
 
+      geocodeMissing(missing, CASTANHAL_BBOX).then(function (extra) {
+        extra.forEach(function (e) {
+          if (!have[norm(e.display)]) { bairros.push(e); have[norm(e.display)] = true; }
+        });
+        if (bairros.length === 0) { finishEmpty(); return; }
+        renderBairros(bairros, M);
+      });
+    }
+
+    // Geocodifica (no navegador) os bairros faltantes, um a um e com pausa (política de
+    // uso do Nominatim), restrito à caixa urbana de Castanhal.
+    function geocodeMissing(names, bbox) {
+      var out = [];
+      if (!names || !names.length) return Promise.resolve(out);
+      var vb = bbox[0] + "," + bbox[1] + "," + bbox[2] + "," + bbox[3];
+      var i = 0;
+      function step() {
+        if (i >= names.length) return Promise.resolve(out);
+        var name = names[i++];
+        var url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=br" +
+          "&viewbox=" + encodeURIComponent(vb) + "&bounded=1" +
+          "&q=" + encodeURIComponent(name + ", Castanhal, Pará, Brasil");
+        return fetch(url, { headers: { "Accept": "application/json" } })
+          .then(function (r) { return r.ok ? r.json() : []; })
+          .then(function (arr) {
+            if (arr && arr[0] && arr[0].lon && arr[0].lat) {
+              out.push({ display: name, realPoly: null,
+                seed: [parseFloat(arr[0].lon), parseFloat(arr[0].lat)] });
+            }
+          })
+          .catch(function () {})
+          .then(function () { return new Promise(function (res) { setTimeout(res, 1100); }); })
+          .then(step);
+      }
+      return step();
+    }
+
+    function renderBairros(bairros, M) {
       // Evita sementes idênticas (Voronoi falha com pontos duplicados)
       var used = {};
       bairros.forEach(function (b, i) {
@@ -417,8 +481,8 @@
       updateLabelVisibility();
       var reais = order.filter(function (n) { return byName[n].poly; }).length;
       legendFoot.innerHTML =
-        "Fonte: pontos do OpenStreetMap · áreas por <strong>partição de Voronoi</strong> " +
-        "com recorte urbano (aproximadas, não são limites oficiais).";
+        "Fonte: OpenStreetMap + Nominatim (pontos) · áreas por <strong>partição de " +
+        "Voronoi</strong> com recorte urbano (aproximadas, não são limites oficiais).";
       hideOverlay();
     }
 
