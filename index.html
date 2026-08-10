@@ -130,10 +130,10 @@
     "use strict";
 
     var CASTANHAL_CENTER = [-1.2976, -47.9264];
-    // Recorte urbano: raio (km) do buffer de cada bairro. A UNIÃO desses buffers forma
-    // a "mancha urbana" usada para recortar as células de Voronoi — assim não sobram
-    // vãos entre bairros e as células não se esticam para a zona rural.
-    var URBAN_RADIUS_KM = 1.9;
+    // Recorte urbano: margem (km) além do fecho convexo dos bairros. A área de recorte
+    // = fecho convexo dos bairros + esta margem, recortada ao município. Garante
+    // cobertura SEM vãos internos, e mais compacta que o município inteiro.
+    var URBAN_MARGIN_KM = 0.4;
 
     // --- Mapa base -----------------------------------------------------------
     var map = L.map("map", { center: CASTANHAL_CENTER, zoom: 13, zoomControl: true });
@@ -343,10 +343,10 @@
         used[k] = true;
       });
 
-      // Voronoi sobre todas as sementes
+      // Sementes -> diagrama de Voronoi
+      var pts = turf.featureCollection(bairros.map(function (b) { return turf.point(b.seed); }));
       var cells = null;
       try {
-        var pts = turf.featureCollection(bairros.map(function (b) { return turf.point(b.seed); }));
         var bbox;
         if (M) bbox = turf.bbox(M);
         else {
@@ -357,28 +357,25 @@
         cells = turf.voronoi(pts, { bbox: bbox });
       } catch (e) { cells = null; }
 
-      // Mancha urbana = união dos buffers de todos os bairros. Recorta as células de
-      // Voronoi sem deixar vãos entre bairros (a mancha é totalmente coberta pelas
-      // células) e sem esticar para a zona rural.
+      // Mancha urbana = fecho convexo dos bairros + margem, recortada ao município.
+      // Região convexa é totalmente coberta pelas células de Voronoi -> SEM vãos
+      // internos, e mais compacta que o município inteiro.
       var urbanMask = null;
-      bairros.forEach(function (b) {
-        try {
-          var buf = turf.buffer(turf.point(b.seed), URBAN_RADIUS_KM, { units: "kilometers", steps: 16 });
-          if (buf) urbanMask = urbanMask ? (turf.union(urbanMask, buf) || urbanMask) : buf;
-        } catch (e) {}
-      });
-      if (urbanMask && M) { var mc = safeIntersect(urbanMask, M); if (mc) urbanMask = mc; }
+      try {
+        var hull = turf.convex(pts);
+        if (hull) urbanMask = turf.buffer(hull, URBAN_MARGIN_KM, { units: "kilometers", steps: 16 }) || hull;
+        if (urbanMask && M) { var mc = safeIntersect(urbanMask, M); if (mc) urbanMask = mc; }
+      } catch (e) { urbanMask = null; }
 
-      // Desenha cada bairro como polígono
+      // Desenha cada bairro como um polígono (célula de Voronoi recortada à mancha
+      // urbana). Usar as células para TODOS garante cobertura contígua, sem os vãos
+      // que surgiam ao redor dos poucos bairros com contorno próprio no OSM.
       bairros.forEach(function (b, i) {
         var labelLatLng = L.latLng(b.seed[1], b.seed[0]);
         var geom = null;
 
-        if (b.realPoly) {
-          geom = b.realPoly;                       // contorno real do OSM
-        } else if (cells && cells.features && cells.features[i]) {
+        if (cells && cells.features && cells.features[i]) {
           geom = cells.features[i];
-          // Recorta à mancha urbana (união dos buffers); fallback: limite municipal
           if (urbanMask) geom = safeIntersect(geom, urbanMask) || geom;
           else if (M) geom = safeIntersect(geom, M) || geom;
         }
@@ -420,8 +417,8 @@
       updateLabelVisibility();
       var reais = order.filter(function (n) { return byName[n].poly; }).length;
       legendFoot.innerHTML =
-        "Fonte: OpenStreetMap · contornos reais quando disponíveis; demais por " +
-        "<strong>Voronoi</strong> com recorte urbano (aproximado, não oficial).";
+        "Fonte: pontos do OpenStreetMap · áreas por <strong>partição de Voronoi</strong> " +
+        "com recorte urbano (aproximadas, não são limites oficiais).";
       hideOverlay();
     }
 
