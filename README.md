@@ -14,8 +14,9 @@ para cada bairro e navegação **estilo Google Maps** (zoom, arraste, satélite)
   [Overpass API](https://overpass-api.de/). Onde o OSM tem o **contorno oficial** do
   bairro, ele é usado; para os demais (que existem no OSM apenas como um ponto), a
   página gera automaticamente o polígono por **partição de Voronoi** (área de influência
-  de cada ponto), recortada ao limite do município — garantindo que **todos** os bairros
-  apareçam como área, e não como ponto.
+  de cada ponto), com **recorte urbano** (raio máximo por bairro) e recorte ao limite do
+  município — garantindo que **todos** os bairros apareçam como área, e não como ponto,
+  sem "esticar" para a zona rural.
 - **Dois mapas base alternáveis:** Ruas (OpenStreetMap) e Satélite (Esri World Imagery).
 - **Legenda clicável** — lista os bairros; clicar centraliza e dá zoom no bairro.
 - **Modo de emergência** — se a Overpass estiver indisponível, exibe posições

@@ -130,6 +130,9 @@
     "use strict";
 
     var CASTANHAL_CENTER = [-1.2976, -47.9264];
+    // Recorte urbano: raio máximo (km) de cada célula Voronoi ao redor do ponto do
+    // bairro. Evita que bairros de borda "estiquem" para a zona rural do município.
+    var URBAN_RADIUS_KM = 1.7;
 
     // --- Mapa base -----------------------------------------------------------
     var map = L.map("map", { center: CASTANHAL_CENTER, zoom: 13, zoomControl: true });
@@ -361,8 +364,13 @@
         if (b.realPoly) {
           geom = b.realPoly;                       // contorno real do OSM
         } else if (cells && cells.features && cells.features[i]) {
-          var cell = cells.features[i];
-          geom = M ? (safeIntersect(cell, M) || cell) : cell;   // Voronoi recortado ao município
+          geom = cells.features[i];
+          if (M) geom = safeIntersect(geom, M) || geom;          // dentro do município
+          // Recorte urbano: limita a célula a um raio ao redor do ponto do bairro
+          try {
+            var disk = turf.buffer(turf.point(b.seed), URBAN_RADIUS_KM, { units: "kilometers" });
+            if (disk) geom = safeIntersect(geom, disk) || geom;
+          } catch (e) {}
         }
 
         if (geom && (isPolygon(geom.geometry) || isPolygon(geom))) {
@@ -402,8 +410,8 @@
       updateLabelVisibility();
       var reais = order.filter(function (n) { return byName[n].poly; }).length;
       legendFoot.innerHTML =
-        "Fonte: OpenStreetMap · contornos reais quando disponíveis; demais bairros por " +
-        "<strong>partição de Voronoi</strong> (aproximada).";
+        "Fonte: OpenStreetMap · contornos reais quando disponíveis; demais por " +
+        "<strong>Voronoi</strong> com recorte urbano (aproximado, não oficial).";
       hideOverlay();
     }
 
